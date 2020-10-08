@@ -73,7 +73,7 @@ func (s *Server) serveConn(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	req.Command = command(cmd)
+	req.Command = Command(cmd)
 
 	addr, err := readAddrAndUser(conn)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *Server) serveConn(conn net.Conn) error {
 	}
 	req.DestinationAddr = &addr.Addr
 	req.Username = addr.Username
-	if s.Authentication != nil && !s.Authentication.Auth(req.Username) {
+	if s.Authentication != nil && !s.Authentication.Auth(req.Command, req.Username) {
 		if err := sendReply(req.Conn, invalidUserReply, nil); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
@@ -97,12 +97,13 @@ func (s *Server) handle(req *request) error {
 	switch req.Command {
 	case connectCommand:
 		return s.handleConnect(req)
-	//case bindCommand:
+	case bindCommand:
+		return s.handleBind(req)
 	default:
 		if err := sendReply(req.Conn, rejectedReply, nil); err != nil {
 			return err
 		}
-		return fmt.Errorf("unsupported command: %v", req.Command)
+		return fmt.Errorf("unsupported Command: %v", req.Command)
 	}
 }
 
@@ -122,6 +123,51 @@ func (s *Server) handleConnect(req *request) error {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 	return tunnel(ctx, target, req.Conn)
+}
+
+func (s *Server) handleBind(req *request) error {
+	ctx := s.context()
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", req.DestinationAddr.String())
+	if err != nil {
+		if err := sendReply(req.Conn, rejectedReply, nil); err != nil {
+			return fmt.Errorf("failed to send reply: %v", err)
+		}
+		return fmt.Errorf("connect to %v failed: %w", req.DestinationAddr, err)
+	}
+
+	localAddr := listener.Addr()
+	local, ok := localAddr.(*net.TCPAddr)
+	if !ok {
+		listener.Close()
+		return fmt.Errorf("connect to %v failed: local address is %s://%s", req.DestinationAddr, localAddr.Network(), localAddr.String())
+	}
+	bind := Addr{IP: local.IP, Port: local.Port}
+	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
+		listener.Close()
+		return fmt.Errorf("failed to send reply: %v", err)
+	}
+
+	conn, err := listener.Accept()
+	if err != nil {
+		listener.Close()
+		if err := sendReply(req.Conn, rejectedReply, nil); err != nil {
+			return fmt.Errorf("failed to send reply: %v", err)
+		}
+		return fmt.Errorf("connect to %v failed: %w", req.DestinationAddr, err)
+	}
+	listener.Close()
+
+	remoteAddr := conn.RemoteAddr()
+	local, ok = remoteAddr.(*net.TCPAddr)
+	if !ok {
+		return fmt.Errorf("connect to %v failed: remote address is %s://%s", req.DestinationAddr, localAddr.Network(), localAddr.String())
+	}
+	bind = Addr{IP: local.IP, Port: local.Port}
+	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
+		return fmt.Errorf("failed to send reply: %v", err)
+	}
+	return tunnel(ctx, conn, req.Conn)
 }
 
 func (s *Server) proxyDial(ctx context.Context, network, address string) (net.Conn, error) {
@@ -151,7 +197,7 @@ func sendReply(w io.Writer, resp reply, addr *Addr) error {
 
 type request struct {
 	Version         uint8
-	Command         command
+	Command         Command
 	DestinationAddr *Addr
 	Username        string
 	Conn            net.Conn

@@ -28,14 +28,14 @@ const (
 )
 
 const (
-	connectCommand command = 0x01
-	bindCommand    command = 0x02
+	connectCommand Command = 0x01
+	bindCommand    Command = 0x02
 )
 
-// command is a SOCKS command.
-type command byte
+// Command is a SOCKS Command.
+type Command byte
 
-func (cmd command) String() string {
+func (cmd Command) String() string {
 	switch cmd {
 	case connectCommand:
 		return "socks connect"
@@ -53,7 +53,7 @@ const (
 	invalidUserReply reply = 0x5d
 )
 
-// reply is a SOCKS command reply code.
+// reply is a SOCKS Command reply code.
 type reply byte
 
 func (code reply) String() string {
@@ -176,9 +176,15 @@ func writeAddrAndUser(w io.Writer, addr *AddrAnfUser) error {
 		return err
 	}
 
+	socks4a := false
 	ip := addr.IP.To4()
 	if ip == nil {
-		_, err = w.Write(isSocks4a)
+		if addr.Name != "" {
+			socks4a = true
+			_, err = w.Write(isSocks4a)
+		} else {
+			_, err = w.Write(isNone)
+		}
 	} else {
 		_, err = w.Write(ip)
 	}
@@ -191,7 +197,7 @@ func writeAddrAndUser(w io.Writer, addr *AddrAnfUser) error {
 		return err
 	}
 
-	if ip == nil {
+	if socks4a {
 		err = writeBytes(w, []byte(addr.Name))
 		if err != nil {
 			return err

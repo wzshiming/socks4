@@ -10,21 +10,6 @@ import (
 	"time"
 )
 
-// Conn is a forward proxy connection.
-type Conn struct {
-	net.Conn
-	boundAddr net.Addr
-}
-
-// BoundAddr returns the address assigned by the proxy server for
-// connecting to the command target address from the proxy server.
-func (c *Conn) BoundAddr() net.Addr {
-	if c == nil {
-		return nil
-	}
-	return c.boundAddr
-}
-
 // Dialer is a SOCKS4 dialer.
 type Dialer struct {
 	// ProxyNetwork network between a proxy server and a client
@@ -76,19 +61,45 @@ func NewDialer(addr string) (*Dialer, error) {
 
 // DialContext connects to the provided address on the provided network.
 func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	switch network {
+	default:
+		return nil, fmt.Errorf("unsupported network %q", network)
+	case "tcp", "tcp4", "tcp6":
+		return d.do(ctx, connectCommand, address)
+	}
+}
+
+// Dial connects to the provided address on the provided network.
+func (d *Dialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+
+func (d *Dialer) Listen(ctx context.Context, network, address string) (net.Listener, error) {
+	switch network {
+	default:
+		return nil, fmt.Errorf("unsupported network %q", network)
+	case "tcp", "tcp4", "tcp6":
+	}
+	return &listener{ctx: ctx, d: d, address: address}, nil
+}
+
+// DialContext connects to the provided address on the provided network.
+func (d *Dialer) do(ctx context.Context, cmd Command, address string) (net.Conn, error) {
 	if d.IsResolve {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
 		}
-		ip := net.ParseIP(host)
-		if ip == nil {
-			ipaddr, err := d.resolver().LookupIP(ctx, "ip4", host)
-			if err != nil {
-				return nil, err
+		if host != "" {
+			ip := net.ParseIP(host)
+			if ip == nil {
+				ipaddr, err := d.resolver().LookupIP(ctx, "ip4", host)
+				if err != nil {
+					return nil, err
+				}
+				host := ipaddr[0].String()
+				address = net.JoinHostPort(host, port)
 			}
-			host := ipaddr[0].String()
-			address = net.JoinHostPort(host, port)
 		}
 	}
 
@@ -97,21 +108,16 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 		return nil, err
 	}
 
-	addr, err := d.connect(ctx, conn, network, address)
+	_, err = d.connect(ctx, conn, cmd, address)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 
-	return &Conn{Conn: conn, boundAddr: addr}, nil
+	return conn, nil
 }
 
-// Dial connects to the provided address on the provided network.
-func (d *Dialer) Dial(network, address string) (net.Conn, error) {
-	return d.DialContext(context.Background(), network, address)
-}
-
-func (d *Dialer) connect(ctx context.Context, conn net.Conn, network, address string) (net.Addr, error) {
+func (d *Dialer) connect(ctx context.Context, conn net.Conn, cmd Command, address string) (net.Addr, error) {
 	if d.Timeout != 0 {
 		deadline := time.Now().Add(d.Timeout)
 		if d, ok := ctx.Deadline(); !ok || deadline.Before(d) {
@@ -125,7 +131,7 @@ func (d *Dialer) connect(ctx context.Context, conn net.Conn, network, address st
 		defer conn.SetDeadline(time.Time{})
 	}
 
-	_, err := conn.Write([]byte{socks4Version, byte(connectCommand)})
+	_, err := conn.Write([]byte{socks4Version, byte(cmd)})
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +140,10 @@ func (d *Dialer) connect(ctx context.Context, conn net.Conn, network, address st
 	if err != nil {
 		return nil, err
 	}
+	return d.readReply(conn)
+}
 
+func (d *Dialer) readReply(conn net.Conn) (net.Addr, error) {
 	var header [2]byte
 	i, err := io.ReadFull(conn, header[:])
 	if err != nil {
@@ -169,4 +178,42 @@ func (d *Dialer) proxyDial(ctx context.Context, network, address string) (net.Co
 		proxyDial = dialer.DialContext
 	}
 	return proxyDial(ctx, network, address)
+}
+
+type listener struct {
+	ctx     context.Context
+	d       *Dialer
+	address string
+}
+
+// Accept waits for and returns the next connection to the listener.
+func (l *listener) Accept() (net.Conn, error) {
+	conn, err := l.d.do(l.ctx, bindCommand, l.address)
+	if err != nil {
+		return nil, err
+	}
+	addr, err := l.d.readReply(conn)
+	if err != nil {
+		return nil, err
+	}
+	return &connect{Conn: conn, remoteAddr: addr}, nil
+}
+
+// Close closes the listener.
+func (l *listener) Close() error {
+	return nil
+}
+
+// Addr returns the listener's network address.
+func (l *listener) Addr() net.Addr {
+	return nil
+}
+
+type connect struct {
+	net.Conn
+	remoteAddr net.Addr
+}
+
+func (c *connect) RemoteAddr() net.Addr {
+	return c.remoteAddr
 }

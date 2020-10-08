@@ -15,7 +15,7 @@ Socks4/Socks4a server and client
 [Example](https://github.com/wzshiming/socks4/blob/master/cmd/socks4/main.go)
 
 - [x] Support for the CONNECT command
-- [ ] Support for the BIND command
+- [x] Support for the BIND command
 
 ## License
 
