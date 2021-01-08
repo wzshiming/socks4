@@ -33,7 +33,10 @@ type Dialer struct {
 // NewDialer returns a new Dialer that dials through the provided
 // proxy server's network and address.
 func NewDialer(addr string) (*Dialer, error) {
-	d := &Dialer{ProxyNetwork: "tcp"}
+	d := &Dialer{
+		ProxyNetwork: "tcp",
+		Timeout:      time.Minute,
+	}
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err
@@ -65,7 +68,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 	default:
 		return nil, fmt.Errorf("unsupported network %q", network)
 	case "tcp", "tcp4", "tcp6":
-		return d.do(ctx, connectCommand, address)
+		return d.do(ctx, ConnectCommand, address)
 	}
 }
 
@@ -188,7 +191,7 @@ type listener struct {
 
 // Accept waits for and returns the next connection to the listener.
 func (l *listener) Accept() (net.Conn, error) {
-	conn, err := l.d.do(l.ctx, bindCommand, l.address)
+	conn, err := l.d.do(l.ctx, BindCommand, l.address)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +207,7 @@ func (l *listener) Close() error {
 	return nil
 }
 
-// Addr returns the listener's network address.
+// address returns the listener's network address.
 func (l *listener) Addr() net.Addr {
 	return nil
 }

@@ -19,6 +19,8 @@ type Server struct {
 	Logger *log.Logger
 	// Context is default context
 	Context context.Context
+	// BytesPool getting and returning temporary bytes for use by io.CopyBuffer
+	BytesPool BytesPool
 }
 
 // NewServer creates a new Server
@@ -82,7 +84,7 @@ func (s *Server) serveConn(conn net.Conn) error {
 		}
 		return err
 	}
-	req.DestinationAddr = &addr.Addr
+	req.DestinationAddr = &addr.address
 	req.Username = addr.Username
 	if s.Authentication != nil && !s.Authentication.Auth(req.Command, req.Username) {
 		if err := sendReply(req.Conn, invalidUserReply, nil); err != nil {
@@ -95,9 +97,9 @@ func (s *Server) serveConn(conn net.Conn) error {
 
 func (s *Server) handle(req *request) error {
 	switch req.Command {
-	case connectCommand:
+	case ConnectCommand:
 		return s.handleConnect(req)
-	case bindCommand:
+	case BindCommand:
 		return s.handleBind(req)
 	default:
 		if err := sendReply(req.Conn, rejectedReply, nil); err != nil {
@@ -118,11 +120,24 @@ func (s *Server) handleConnect(req *request) error {
 	}
 
 	local := target.LocalAddr().(*net.TCPAddr)
-	bind := Addr{IP: local.IP, Port: local.Port}
+	bind := address{IP: local.IP, Port: local.Port}
 	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
-	return tunnel(ctx, target, req.Conn)
+
+	var buf1, buf2 []byte
+	if s.BytesPool != nil {
+		buf1 = s.BytesPool.Get()
+		buf2 = s.BytesPool.Get()
+		defer func() {
+			s.BytesPool.Put(buf1)
+			s.BytesPool.Put(buf2)
+		}()
+	} else {
+		buf1 = make([]byte, 32*1024)
+		buf2 = make([]byte, 32*1024)
+	}
+	return tunnel(ctx, target, req.Conn, buf1, buf2)
 }
 
 func (s *Server) handleBind(req *request) error {
@@ -142,7 +157,7 @@ func (s *Server) handleBind(req *request) error {
 		listener.Close()
 		return fmt.Errorf("connect to %v failed: local address is %s://%s", req.DestinationAddr, localAddr.Network(), localAddr.String())
 	}
-	bind := Addr{IP: local.IP, Port: local.Port}
+	bind := address{IP: local.IP, Port: local.Port}
 	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
 		listener.Close()
 		return fmt.Errorf("failed to send reply: %v", err)
@@ -163,11 +178,24 @@ func (s *Server) handleBind(req *request) error {
 	if !ok {
 		return fmt.Errorf("connect to %v failed: remote address is %s://%s", req.DestinationAddr, localAddr.Network(), localAddr.String())
 	}
-	bind = Addr{IP: local.IP, Port: local.Port}
+	bind = address{IP: local.IP, Port: local.Port}
 	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
-	return tunnel(ctx, conn, req.Conn)
+
+	var buf1, buf2 []byte
+	if s.BytesPool != nil {
+		buf1 = s.BytesPool.Get()
+		buf2 = s.BytesPool.Get()
+		defer func() {
+			s.BytesPool.Put(buf1)
+			s.BytesPool.Put(buf2)
+		}()
+	} else {
+		buf1 = make([]byte, 32*1024)
+		buf2 = make([]byte, 32*1024)
+	}
+	return tunnel(ctx, conn, req.Conn, buf1, buf2)
 }
 
 func (s *Server) proxyDial(ctx context.Context, network, address string) (net.Conn, error) {
@@ -186,7 +214,7 @@ func (s *Server) context() context.Context {
 	return s.Context
 }
 
-func sendReply(w io.Writer, resp reply, addr *Addr) error {
+func sendReply(w io.Writer, resp reply, addr *address) error {
 	_, err := w.Write([]byte{0, byte(resp)})
 	if err != nil {
 		return err
@@ -198,7 +226,7 @@ func sendReply(w io.Writer, resp reply, addr *Addr) error {
 type request struct {
 	Version         uint8
 	Command         Command
-	DestinationAddr *Addr
+	DestinationAddr *address
 	Username        string
 	Conn            net.Conn
 }
