@@ -41,7 +41,6 @@ func TestServerAndAuthClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-
 }
 
 func TestServerAndClient(t *testing.T) {
@@ -146,6 +145,28 @@ func TestBind(t *testing.T) {
 	go http.Serve(listener, nil)
 	time.Sleep(time.Second / 10)
 	resp, err := http.Get("http://127.0.0.1:10000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
+func TestSimpleServer(t *testing.T) {
+	s, err := NewSimpleServer("socks4://u@:0")
+
+	s.Start(context.Background())
+	defer s.Close()
+
+	dial, err := NewDialer(s.ProxyURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := testServer.Client()
+	cli.Transport = &http.Transport{
+		DialContext: dial.DialContext,
+	}
+
+	resp, err := cli.Get(testServer.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

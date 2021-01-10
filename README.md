@@ -8,6 +8,8 @@ Socks4/Socks4a server and client
 [![GitHub license](https://img.shields.io/github/license/wzshiming/socks4.svg)](https://github.com/wzshiming/socks4/blob/master/LICENSE)
 [![gocover.io](https://gocover.io/_badge/github.com/wzshiming/socks4)](https://gocover.io/github.com/wzshiming/socks4)
 
+This project is to add protocol support for the [Bridge](https://github.com/wzshiming/bridge), or it can be used alone
+
 The following is the implementation of other proxy protocols
 
 - [Socks5](https://github.com/wzshiming/socks5)
