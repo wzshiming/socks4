@@ -13,7 +13,7 @@ type Server struct {
 	Authentication Authentication
 	// ProxyDial specifies the optional proxyDial function for
 	// establishing the transport connection.
-	ProxyDial func(context.Context, string, string) (net.Conn, error)
+	ProxyDial func(ctx context.Context, network string, address string) (net.Conn, error)
 	// Logger error log
 	Logger Logger
 	// Context is default context
