@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Server is accepting connections and handling the details of the SOCKS4 protocol
@@ -14,6 +17,15 @@ type Server struct {
 	// ProxyDial specifies the optional proxyDial function for
 	// establishing the transport connection.
 	ProxyDial func(ctx context.Context, network string, address string) (net.Conn, error)
+	// ProxyListenBind specifies the optional proxyListenBind function for
+	// establishing the transport connection.
+	ProxyListenBind func(ctx context.Context, network string, address string) (net.Listener, error)
+	// ListenBindReuseTimeout is the timeout for reusing bind listener
+	ListenBindReuseTimeout time.Duration
+	// ListenBindAcceptTimeout is the timeout for accepting connections on bind listener
+	ListenBindAcceptTimeout time.Duration
+	// reserveListenBind is a pool for reusing bind listeners across requests.
+	reserveListenBind reserveListen
 	// Logger error log
 	Logger Logger
 	// Context is default context
@@ -28,7 +40,9 @@ type Logger interface {
 
 // NewServer creates a new Server
 func NewServer() *Server {
-	return &Server{}
+	return &Server{
+		ListenBindReuseTimeout: time.Second / 2,
+	}
 }
 
 // ListenAndServe is used to create a listener and serve on it
@@ -145,8 +159,17 @@ func (s *Server) handleConnect(req *request) error {
 
 func (s *Server) handleBind(req *request) error {
 	ctx := s.context()
-	var lc net.ListenConfig
-	listener, err := lc.Listen(ctx, "tcp", req.DestinationAddr.String())
+	addr := req.DestinationAddr.String()
+
+	var listener net.Listener
+	var err error
+	if s.ListenBindReuseTimeout > 0 {
+		listener, err = s.reserveListenBind.getOrNew(addr, func() (net.Listener, error) {
+			return s.proxyListenBind(ctx, "tcp", addr)
+		}, s.ListenBindReuseTimeout, s.ListenBindAcceptTimeout, s.Logger)
+	} else {
+		listener, err = s.proxyListenBind(ctx, "tcp", addr)
+	}
 	if err != nil {
 		if err := sendReply(req.Conn, rejectedReply, nil); err != nil {
 			return fmt.Errorf("failed to send reply: %v", err)
@@ -210,6 +233,15 @@ func (s *Server) proxyDial(ctx context.Context, network, address string) (net.Co
 	return proxyDial(ctx, network, address)
 }
 
+func (s *Server) proxyListenBind(ctx context.Context, network, address string) (net.Listener, error) {
+	proxyListenBind := s.ProxyListenBind
+	if proxyListenBind == nil {
+		var listenConfig net.ListenConfig
+		proxyListenBind = listenConfig.Listen
+	}
+	return proxyListenBind(ctx, network, address)
+}
+
 func (s *Server) context() context.Context {
 	if s.Context == nil {
 		return context.Background()
@@ -232,4 +264,113 @@ type request struct {
 	DestinationAddr *address
 	Username        string
 	Conn            net.Conn
+}
+
+type reserveListen struct {
+	mut               sync.Mutex
+	reservedListeners map[string]*reserved
+}
+
+type reserved struct {
+	key   string
+	base  net.Listener
+	conns chan net.Conn
+}
+
+type holdListener struct {
+	r      *reserved
+	closed atomic.Bool
+}
+
+func (r *reserveListen) getOrNew(key string, newFunc func() (net.Listener, error), reuse, accept time.Duration, logger Logger) (net.Listener, error) {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+
+	reserve := r.reservedListeners[key]
+	if reserve != nil {
+		return &holdListener{r: reserve}, nil
+	}
+
+	listener, err := newFunc()
+	if err != nil {
+		return nil, err
+	}
+	reserve = &reserved{
+		key:   key,
+		base:  listener,
+		conns: make(chan net.Conn),
+	}
+	if r.reservedListeners == nil {
+		r.reservedListeners = map[string]*reserved{}
+	}
+	r.reservedListeners[key] = reserve
+
+	if accept > 0 {
+		_, ok := listener.(setDeadline)
+		if !ok {
+			accept = 0
+			if logger != nil {
+				logger.Println("reserve bind listener does not support SetDeadline, disabling accept timeout")
+			}
+		}
+	}
+	go reserve.run(reuse, accept, logger)
+	return &holdListener{r: reserve}, nil
+}
+
+type setDeadline interface {
+	SetDeadline(t time.Time) error
+}
+
+func (r *reserved) run(reuse, accept time.Duration, logger Logger) {
+	defer func() {
+		r.base.Close()
+		close(r.conns)
+	}()
+
+	for {
+		if accept > 0 {
+			r.base.(setDeadline).SetDeadline(time.Now().Add(accept))
+		}
+		conn, err := r.base.Accept()
+		if err != nil {
+			if logger != nil {
+				logger.Println("reserve bind listen accept error:", err)
+			}
+			return
+		}
+
+		select {
+		case r.conns <- conn:
+		case <-time.After(reuse):
+			conn.Close()
+			if logger != nil {
+				logger.Println("reserve bind listen reuse timeout")
+			}
+			return
+		}
+	}
+}
+
+func (h *holdListener) Accept() (net.Conn, error) {
+	if h.closed.Load() {
+		return nil, net.ErrClosed
+	}
+	conn, ok := <-h.r.conns
+	if !ok {
+		h.closed.Store(true)
+		return nil, net.ErrClosed
+	}
+	return conn, nil
+}
+
+func (h *holdListener) Close() error {
+	if h.closed.Swap(true) {
+		return net.ErrClosed
+	}
+	return nil
+}
+
+func (h *holdListener) Addr() net.Addr {
+	return h.r.base.Addr()
 }
