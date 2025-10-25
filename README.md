@@ -4,9 +4,8 @@ Socks4/Socks4a server and client
 
 [![Build](https://github.com/wzshiming/socks4/actions/workflows/go-cross-build.yml/badge.svg)](https://github.com/wzshiming/socks4/actions/workflows/go-cross-build.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wzshiming/socks4)](https://goreportcard.com/report/github.com/wzshiming/socks4)
-[![GoDoc](https://godoc.org/github.com/wzshiming/socks4?status.svg)](https://godoc.org/github.com/wzshiming/socks4)
+[![GoDoc](https://pkg.go.dev/badge/github.com/wzshiming/socks4)](https://pkg.go.dev/github.com/wzshiming/socks4)
 [![GitHub license](https://img.shields.io/github/license/wzshiming/socks4.svg)](https://github.com/wzshiming/socks4/blob/master/LICENSE)
-[![gocover.io](https://gocover.io/_badge/github.com/wzshiming/socks4)](https://gocover.io/github.com/wzshiming/socks4)
 
 This project is to add protocol support for the [Bridge](https://github.com/wzshiming/bridge), or it can be used alone
 
