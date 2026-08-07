@@ -24,6 +24,9 @@ type Server struct {
 	ListenBindReuseTimeout time.Duration
 	// ListenBindAcceptTimeout is the timeout for accepting connections on bind listener
 	ListenBindAcceptTimeout time.Duration
+	// HandshakeTimeout is the maximum amount of time to read the request
+	// from a client. Zero means no timeout.
+	HandshakeTimeout time.Duration
 	// reserveListenBind is a pool for reusing bind listeners across requests.
 	reserveListenBind reserveListen
 	// Logger error log
@@ -42,6 +45,7 @@ type Logger interface {
 func NewServer() *Server {
 	return &Server{
 		ListenBindReuseTimeout: time.Second / 2,
+		HandshakeTimeout:       10 * time.Second,
 	}
 }
 
@@ -76,6 +80,9 @@ func (s *Server) ServeConn(conn net.Conn) {
 }
 
 func (s *Server) serveConn(conn net.Conn) error {
+	if s.HandshakeTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(s.HandshakeTimeout))
+	}
 	version, err := readByte(conn)
 	if err != nil {
 		return err
@@ -107,6 +114,9 @@ func (s *Server) serveConn(conn net.Conn) error {
 			return fmt.Errorf("failed to send reply: %v", err)
 		}
 		return errUserAuthFailed
+	}
+	if s.HandshakeTimeout > 0 {
+		conn.SetReadDeadline(time.Time{})
 	}
 	return s.handle(req)
 }
