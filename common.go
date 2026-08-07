@@ -63,7 +63,7 @@ func (code reply) String() string {
 	case rejectedReply:
 		return "request rejected or failed"
 	case noIdentdReply:
-		return "request rejected becasue SOCKS server cannot connect to identd on the client"
+		return "request rejected because SOCKS server cannot connect to identd on the client"
 	case invalidUserReply:
 		return "request rejected because the client program and identd report different user-ids"
 	default:
@@ -98,7 +98,8 @@ func (a address) Address() string {
 	return net.JoinHostPort(a.IP.String(), port)
 }
 
-type AddrAnfUser struct {
+// AddrAndUser is a SOCKS4 address with the userid.
+type AddrAndUser struct {
 	address
 	Username string
 }
@@ -138,8 +139,8 @@ func readByte(r io.Reader) (byte, error) {
 	return buf[0], nil
 }
 
-func readAddrAndUser(r io.Reader) (*AddrAnfUser, error) {
-	address := &AddrAnfUser{}
+func readAddrAndUser(r io.Reader) (*AddrAndUser, error) {
+	address := &AddrAndUser{}
 	var port [2]byte
 	if _, err := io.ReadFull(r, port[:]); err != nil {
 		return nil, err
@@ -168,7 +169,7 @@ func readAddrAndUser(r io.Reader) (*AddrAnfUser, error) {
 	return address, nil
 }
 
-func writeAddrAndUser(w io.Writer, addr *AddrAnfUser) error {
+func writeAddrAndUser(w io.Writer, addr *AddrAndUser) error {
 	var port [2]byte
 	binary.BigEndian.PutUint16(port[:], uint16(addr.Port))
 	_, err := w.Write(port[:])
@@ -249,9 +250,9 @@ func writeAddrAndUserWithStr(w io.Writer, addr, username string) error {
 		return err
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return writeAddrAndUser(w, &AddrAnfUser{address: address{IP: ip, Port: port}, Username: username})
+		return writeAddrAndUser(w, &AddrAndUser{address: address{IP: ip, Port: port}, Username: username})
 	}
-	return writeAddrAndUser(w, &AddrAnfUser{address: address{Name: host, Port: port}, Username: username})
+	return writeAddrAndUser(w, &AddrAndUser{address: address{Name: host, Port: port}, Username: username})
 }
 
 func splitHostPort(address string) (string, int, error) {
