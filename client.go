@@ -100,6 +100,9 @@ func (d *Dialer) do(ctx context.Context, cmd Command, address string) (net.Conn,
 				if err != nil {
 					return nil, err
 				}
+				if len(ipaddr) == 0 {
+					return nil, fmt.Errorf("no IPv4 address found for %s", host)
+				}
 				host := ipaddr[0].String()
 				address = net.JoinHostPort(host, port)
 			}
@@ -160,6 +163,9 @@ func (d *Dialer) readReply(conn net.Conn) (net.Addr, error) {
 		return nil, err
 	}
 
+	if header[0] != 0 {
+		return nil, fmt.Errorf("unexpected protocol version %d in reply", header[0])
+	}
 	rep := reply(header[1])
 	if rep != grantedReply {
 		return nil, fmt.Errorf("socks connection request failed: %s", rep)

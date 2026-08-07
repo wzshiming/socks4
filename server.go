@@ -84,8 +84,7 @@ func (s *Server) serveConn(conn net.Conn) error {
 		return fmt.Errorf("unsupported SOCKS version: %d", version)
 	}
 	req := &request{
-		Version: socks4Version,
-		Conn:    conn,
+		Conn: conn,
 	}
 
 	cmd, err := readByte(conn)
@@ -261,7 +260,6 @@ func sendReply(w io.Writer, resp reply, addr *address) error {
 }
 
 type request struct {
-	Version         uint8
 	Command         Command
 	DestinationAddr *address
 	Username        string
