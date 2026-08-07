@@ -202,10 +202,12 @@ func (s *Server) handleBind(req *request) error {
 	remoteAddr := conn.RemoteAddr()
 	local, ok = remoteAddr.(*net.TCPAddr)
 	if !ok {
-		return fmt.Errorf("connect to %v failed: remote address is %s://%s", req.DestinationAddr, localAddr.Network(), localAddr.String())
+		conn.Close()
+		return fmt.Errorf("connect to %v failed: remote address is %s://%s", req.DestinationAddr, remoteAddr.Network(), remoteAddr.String())
 	}
 	bind = address{IP: local.IP, Port: local.Port}
 	if err := sendReply(req.Conn, grantedReply, &bind); err != nil {
+		conn.Close()
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 
