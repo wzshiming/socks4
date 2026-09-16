@@ -114,16 +114,16 @@ func (d *Dialer) do(ctx context.Context, cmd Command, address string) (net.Conn,
 		return nil, err
 	}
 
-	_, err = d.connect(ctx, conn, cmd, address)
+	c, err := d.connect(ctx, conn, cmd, address)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 
-	return conn, nil
+	return c, nil
 }
 
-func (d *Dialer) connect(ctx context.Context, conn net.Conn, cmd Command, address string) (net.Addr, error) {
+func (d *Dialer) connect(ctx context.Context, conn net.Conn, cmd Command, address string) (net.Conn, error) {
 	if d.Timeout != 0 {
 		deadline := time.Now().Add(d.Timeout)
 		if d, ok := ctx.Deadline(); !ok || deadline.Before(d) {
@@ -146,7 +146,11 @@ func (d *Dialer) connect(ctx context.Context, conn net.Conn, cmd Command, addres
 	if err != nil {
 		return nil, err
 	}
-	return d.readReply(conn)
+	_, err = d.readReply(conn)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (d *Dialer) readReply(conn net.Conn) (net.Addr, error) {
