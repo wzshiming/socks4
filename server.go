@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -29,16 +30,12 @@ type Server struct {
 	HandshakeTimeout time.Duration
 	// reserveListenBind is a pool for reusing bind listeners across requests.
 	reserveListenBind reserveListen
-	// Logger error log
-	Logger Logger
+	// Logger is the structured logger, nil means no logging
+	Logger *slog.Logger
 	// Context is default context
 	Context context.Context
 	// BytesPool getting and returning temporary bytes for use by io.CopyBuffer
 	BytesPool BytesPool
-}
-
-type Logger interface {
-	Println(v ...interface{})
 }
 
 // NewServer creates a new Server
@@ -75,7 +72,7 @@ func (s *Server) ServeConn(conn net.Conn) {
 	defer conn.Close()
 	err := s.serveConn(conn)
 	if err != nil && s.Logger != nil && !isClosedConnError(err) {
-		s.Logger.Println(err)
+		s.Logger.Error("serve conn", "remote", conn.RemoteAddr(), "err", err)
 	}
 }
 
@@ -292,7 +289,7 @@ type holdListener struct {
 	closed atomic.Bool
 }
 
-func (r *reserveListen) getOrNew(key string, newFunc func() (net.Listener, error), reuse, accept time.Duration, logger Logger) (net.Listener, error) {
+func (r *reserveListen) getOrNew(key string, newFunc func() (net.Listener, error), reuse, accept time.Duration, logger *slog.Logger) (net.Listener, error) {
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
@@ -320,7 +317,7 @@ func (r *reserveListen) getOrNew(key string, newFunc func() (net.Listener, error
 		if !ok {
 			accept = 0
 			if logger != nil {
-				logger.Println("reserve bind listener does not support SetDeadline, disabling accept timeout")
+				logger.Warn("reserve bind listener does not support SetDeadline, disabling accept timeout", "addr", key)
 			}
 		}
 	}
@@ -332,7 +329,7 @@ type setDeadline interface {
 	SetDeadline(t time.Time) error
 }
 
-func (r *reserved) run(reuse, accept time.Duration, logger Logger) {
+func (r *reserved) run(reuse, accept time.Duration, logger *slog.Logger) {
 	defer func() {
 		r.base.Close()
 		close(r.conns)
@@ -345,7 +342,7 @@ func (r *reserved) run(reuse, accept time.Duration, logger Logger) {
 		conn, err := r.base.Accept()
 		if err != nil {
 			if logger != nil {
-				logger.Println("reserve bind listen accept error:", err)
+				logger.Warn("reserve bind listen accept error", "addr", r.key, "err", err)
 			}
 			return
 		}
@@ -355,7 +352,7 @@ func (r *reserved) run(reuse, accept time.Duration, logger Logger) {
 		case <-time.After(reuse):
 			conn.Close()
 			if logger != nil {
-				logger.Println("reserve bind listen reuse timeout")
+				logger.Debug("reserve bind listen reuse timeout", "addr", r.key)
 			}
 			return
 		}

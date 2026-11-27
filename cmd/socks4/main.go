@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/wzshiming/socks4"
@@ -18,7 +18,7 @@ func init() {
 }
 
 func main() {
-	logger := log.New(os.Stderr, "[socks4] ", log.LstdFlags)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	svc := &socks4.Server{
 		Logger: logger,
 	}
@@ -27,6 +27,7 @@ func main() {
 	}
 	err := svc.ListenAndServe("tcp", address)
 	if err != nil {
-		logger.Println(err)
+		logger.Error("listen and serve", "err", err)
+		os.Exit(1)
 	}
 }
